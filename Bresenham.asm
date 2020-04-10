@@ -22,11 +22,30 @@ outfname: 	.asciiz "outfile.bmp"
 
 .text
 main:
-	jal test_draw_line
 	
+test_draw_line:
+# Read image
+	la $a0, imgdescriptor
+	la $a1, fname
+	jal read_bmp_file
+	bltz $v0, main_exit
+
+	la $a0, imgdescriptor	# descriptor
+# 	INPUT
+	la $a1, 13	# x1
+	la $a2, 77	# y1
+	la $a3, 34	# x2
+	la $t0, 173	# y2
+	jal draw_line
+
+	la $a0, imgdescriptor
+	la $a1, outfname
+	jal save_bmp_file
 main_exit:
 	li $v0, 10
 	syscall
+	
+
 test_draw_pixel:
 # call read_bmp_file
 	la $a0, imgdescriptor
@@ -42,100 +61,80 @@ test_draw_pixel:
 	la $a0, imgdescriptor
 	la $a1, outfname
 	jal save_bmp_file
-	
-	jr $ra
-test_draw_line:
-# Save return address
-	addi $sp, $sp, -4
-	sw $ra, 0($sp)
 
-# Read image
-	la $a0, imgdescriptor
-	la $a1, fname
-	jal read_bmp_file
-	bltz $v0, main_exit
-
-	la $a0, imgdescriptor	# descriptor
-	la $a1, 15	# x1
-	la $a2, 5	# y1
-	la $a3, 3	# x2
-	la $t0, 2	# y2
-	jal draw_line
-
-	la $a0, imgdescriptor
-	la $a1, outfname
-	jal save_bmp_file
-
-# Get return address
-	lw $ra, 0($sp)
-	addi $sp, $sp, 4
-	jr $ra
 draw_line:
-# Using t3-7 registers, because t1-2 registers are rewritten in set_pixel function
-	la $t3, ($a1)	# x1
-	la $t4, ($a2)	# y1
-	la $t5, ($a3)	# x2
-	la $t6, ($t0)	# y2
-	la $t7, ($a0)	# descriptor
-	
-	sub $t6, $t6, $t4	# m_new = y2 - y1	
-	sll $t6, $t6, 1		# m_new = m_new * 2
-	sub $t0, $t5, $t3	# slope_error_new = x2 - x1
-	sub $t0, $t6, $t0	# slope_error_new = m_new - slope_error_new
-	
-	la $t1, ($t3)	# x = x1
-	la $t2, ($t4)	# y = y1
-	
-	addi $sp, $sp, -4
-	sw $ra, 0($sp)
-	jal draw_line_loop
-	lw $ra, 0($sp)
-	addi $sp, $sp, 4
-	
-	jr $ra
+# input:
+# a0 -descriptor
+# a1 - x1
+# a2 - y1
+# a3 - x2
+# t0 - y2
+	# parametrs:
+	# a0 -descriptor
+	# a1 - x1
+	# a2 - y1
+	# a3 - color
+	# t0 - x2
+	# t1 - y2
+	# t2 - dx
+	# t3 - dy
+	# t4 - sx
+	# t5 - sy
+	# t6 - err
+	# t7 - 2*err
+	la $t1, ($t0) # t1 - y2
+	la $t0, ($a3) # t0 - x2
+	la $a3, 0 # color
+# remember return address
+	addiu $sp, $sp, -4
+	sw $ra, ($sp)
 
+	la $t4, 1 # sx = -1
+	la $t5, -1 # sy = 1
+	sub $t2, $t0, $a1	# dx = x2 - x1
+	slt $t6, $t2, $zero
+	beq $t6, $zero, dx_is_positive	# if  x1 > x2:
+	sub $t2, $zero, $t2	# dx = |x2 - x1|
+	la $t4, -1
+dx_is_positive:
+	sub $t3, $t1, $a2	# dy = y2 - y1
+	slt $t6, $zero, $t3	
+	beq $t6, $zero, dy_is_negative	# if  y1 < y2:
+	sub $t3, $zero, $t3	# dy = -|y2- y1|
+	la $t5, 1
+dy_is_negative:
+	add $t6, $t2, $t3
 draw_line_loop:
-	
-	addi $sp, $sp, -16
-	sw $ra, 12($sp)
+# plot x, y
+	addiu $sp, $sp, -12
 	sw $t0, 8($sp)
-	sw $t1, 4($sp)
+	sw  $t1, 4($sp)
 	sw $t2, 0($sp)
-	
-	la $a0, ($t7)
-	la $a1, ($t1)
-	la $a2, ($t2)
-	la $a3, 0
-	jal set_pixel
-	
-	lw $ra, 12($sp)
-	lw $t0, 8($sp)
-	lw $t1, 4($sp)
+	jal set_pixel	
 	lw $t2, 0($sp)
-	addi $sp, $sp, 16
-
-	bge $t1, $t5, draw_line_loop_return	# while x <= x2
-	
-	add $t0, $t0, $t6	# slope_error_new += m_new
-	add $t1, $t1, 1		# x++
-	bltz $t0, draw_line_loop	#if slope_error_new >= 0, y++
-	add $t2, $t2, 1
-	sub $a1, $t5, $t3
-	sll $a1, $a1, 1
-	sub $t0, $t0, $a1
-	j draw_line_loop
-
-draw_line_loop_return:
+	lw $t1, 4($sp)
+	lw $t0, 8($sp)
+	addiu $sp, $sp, 12
+# if x0 == x1 and y0 == y1, stop loop
+	seq $t8, $a1, $t0
+	beq $t8, $zero, increment_x
+	seq $t8, $a2, $t1
+	beq $t8, $zero, increment_x
+	lw $ra, 0($sp)
+	addiu $sp, $sp, 4
 	jr $ra
+increment_x:
+	sll $t7, $t6, 1 # 2 * err
+	blt $t7, $t3, increment_y
+	add $t6, $t6, $t3	# err += dy
+	add $a1, $a1, $t4	# x++
+increment_y:
+	sll $t7, $t6, 1 # 2 * err
+	bgt $t7, $t3, draw_line_loop
+	add $t6, $t6, $t2	# err += dx
+	add $a2, $a2, $t5	# y++
+	j draw_line_loop
 	
-	
-	
-
-
-
-	
-	
-
 read_bmp_file:
 #$a0 - descriptor
 #$a1 - file name
