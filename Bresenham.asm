@@ -68,8 +68,12 @@ draw_line:
 # remember the return address
 	addiu $sp, $sp, -4
 	sw $ra, ($sp)
+	# $a0 - desc
 	# $a1 - x1
 	# $a2 - y1
+	# $a3 - mask
+	# $t0 - pixel address
+	# $t1 - extra
 	# $t2 - x2
 	# $t3 - y2
 	# $t4 - dx
@@ -77,7 +81,7 @@ draw_line:
 	# $t6 - sx
 	# $t7 - sy
 	# $t8 - err
-	# $t9 - err2
+	# $t9 - bytes_per_row
 	la $t0, ($a1)	# t0 - coordinates
 	lw $a1, 0($t0)  # a1 - x1
 	lw $a2, 4($t0)  # a2 - y1
@@ -101,53 +105,59 @@ dx_is_positive:
 	la $t7, 1	# set sy to increment
 dy_is_negative:
 	add $t8, $t4, $t5	# error = dx + dy
+	lw $t9, rowsize($a0)	# Bytes per row
+	mul $t0, $t9, $a2	# t0 = y * bytes per row
+	srl $t1, $a1, 3		# t1 = x >> 3
+	add $t0, $t0, $t1	# t0 = y*bytes per row + x >> 8
+	lw $t1, imgaddr($a0)	# image address
+	add $t0, $t0, $t1	# t0 = y * bytes_per_row + x >> 8 + image_address
+
+
 draw_line_loop:
 # plot x, y
-	addiu $sp, $sp, -4
-	sw $t2, 0($sp)
-	lw $t0, rowsize($a0)	# Bytes per row
-	mul $t0, $t0, $a2	# t0 = y * bytes per row
-	srl $t1, $a1, 3		# t1 = x >> 3
-	add $t0, $t0, $t1	# t0 = y*byets per row + x * 8
 	
-	lw $t1, imgaddr($a0)	# image address
-	add $t0, $t0, $t1	# t0 = y * byets_per_row + x * 8 + image_address
-
+# create mask
 	andi $t1, $a1, 0x07	# x and 00000111
-	li $t2, 0x80		# t2 -  10000000
-	srlv $t2, $t2, $t1	# 1 <-> 10000000
+	li $a3, 0x80		# t2 -  10000000
+	srlv $a3, $a3, $t1	# 1 <-> 10000000
 	lb $t1, 0($t0)		
-	
-	not $t2, $t2		# set pixel black
-	and $t1 $t1, $t2
+	not $a3, $a3		# set pixel black
+	and $t1 $t1, $a3
 	sb $t1, 0($t0)
-	lw $t2, 0($sp)
-	addiu $sp, $sp, 4
 	
 # if x0 == x1 and y0 == y1, stop loop
-	seq $t9, $a1, $t2
-	beq $t9, $zero, increment_x
-	seq $t9, $a2, $t3
-	beq $t9, $zero, increment_y
+	seq $t1, $a1, $t2
+	beq $t1, $zero, increment_x
+	seq $t1, $a2, $t3
+	beq $t1, $zero, increment_y
 	lw $ra, 0($sp)
 	addiu $sp, $sp, 4
 	jr $ra
 	
 increment_x:
 
-	sll $t9, $t8, 1 # 2 * err
-	blt $t9, $t5, increment_y	# if err * 2 >= dy
+	sll $t1, $t8, 1 # 2 * err
+	blt $t1, $t5, increment_y	# if err * 2 >= dy
 	add $t8, $t8, $t5	# err += dy
+	srl $t1, $a1, 3
+	sub $t0, $t0, $t1
 	add $a1, $a1, $t6	# x++ / x--
-	seq $t9, $a2, $t3
-	beq $t9, $zero, increment_y
+	srl $t1, $a1, 3
+	add $t0, $t0, $t1
+	seq $t1, $a2, $t3
+	beq $t1, $zero, increment_y
 	j draw_line_loop
 	
 increment_y:
-	sll $t9, $t8, 1 # 2 * err
-	bgt $t9, $t4, draw_line_loop	# if err * 2 < dx
+	sll $t1, $t8, 1 # 2 * err
+	bgt $t1, $t4, draw_line_loop	# if err * 2 < dx
 	add $t8, $t8, $t4	# err += dx
 	add $a2, $a2, $t7	# y++ / y--
+	blt $t7, $zero, draw_down
+	add $t0, $t0, $t9
+	j draw_line_loop
+draw_down:
+	sub $t0, $t0, $t9
 	j draw_line_loop
 
 
@@ -216,26 +226,4 @@ save_bmp_file:
 	li $v0, 16
 	syscall
 	
-	jr $ra
-set_pixel:
-# $a0 - descriptor
-# $a1 - x
-# $a2 - y
-# $a3 - color
-	lw $t0, rowsize($a0)
-	mul $t0, $t0, $a2	# rowsize = rowsize * y_coordinate
-	srl $t1, $a1, 3
-	add $t0, $t0, $t1
-	
-	lw $t1, imgaddr($a0)
-	add $t0, $t0, $t1	# Byte, which contains given pixel
-	
-	andi $t1, $a1, 0x07
-	li $t2, 0x80
-	srlv $t2, $t2, $t1
-	lb $t1, 0($t0)
-	
-	not $t2, $t2
-	and $t1, $t1, $t2
-	sb $t1, 0($t0)
 	jr $ra
