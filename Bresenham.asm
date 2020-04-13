@@ -1,4 +1,4 @@
- # Drawing a straight line with Bresenham algorithm
+ # Drawing a straight line with Bresenham algorithm on a BMP image with sizes being a power of 2. 
 
 .eqv	headeraddr 	0
 .eqv    filesize   	4
@@ -15,6 +15,10 @@ imgdescriptor: 	.word 0
 		.word 0
 		.word 0
 		.word 0
+coordinates:	.word 0
+		.word 0
+		.word 0
+		.word 0
 img:		.space  buffor
 fname:		.asciiz "empty.bmp"
 outfname: 	.asciiz "outfile.bmp"
@@ -22,124 +26,134 @@ outfname: 	.asciiz "outfile.bmp"
 
 .text
 main:
-	
-test_draw_line:
+	j draw_line_test
+main_exit:
+	li $v0, 10
+	syscall
+
+
+draw_line_test:
 # Read image
 	la $a0, imgdescriptor
 	la $a1, fname
 	jal read_bmp_file
 	bltz $v0, main_exit
 
-	la $a0, imgdescriptor	# descriptor
-# 	INPUT
-	la $a1, 13	# x1
-	la $a2, 77	# y1
-	la $a3, 34	# x2
-	la $t0, 173	# y2
+	la $s0, 128	# x1
+	la $s1, 128	# y1
+	la $s2, 0	# x2
+	la $s3, 0	# y2
+
+draw_line_test_1:
+	la $a0, imgdescriptor
+	la $a1, coordinates
+	sw $s0, 0($a1)
+	sw $s1, 4($a1)
+	sw $s2, 8($a1)
+	sw $s3, 12($a1)
 	jal draw_line
-
+	add $s2, $s2, 64
+	ble $s2, 256, draw_line_test_1
+	la $s2, 0
+	add $s3, $s3, 64
+	ble $s3, 256, draw_line_test_1
+	
+draw_lines_test_close:
 	la $a0, imgdescriptor
 	la $a1, outfname
 	jal save_bmp_file
-main_exit:
-	li $v0, 10
-	syscall
-	
-
-test_draw_pixel:
-# call read_bmp_file
-	la $a0, imgdescriptor
-	la $a1, fname
-	jal read_bmp_file
-	
-	la $a0, imgdescriptor
-	li $a1, 100 # x
-	li $a2, 100 # y
-	li $a3, 0 # color
-	jal set_pixel
-	
-	la $a0, imgdescriptor
-	la $a1, outfname
-	jal save_bmp_file
+	j main_exit
 
 draw_line:
-# input:
-# a0 -descriptor
-# a1 - x1
-# a2 - y1
-# a3 - x2
-# t0 - y2
-	# parametrs:
-	# a0 -descriptor
-	# a1 - x1
-	# a2 - y1
-	# a3 - color
-	# t0 - x2
-	# t1 - y2
-	# t2 - dx
-	# t3 - dy
-	# t4 - sx
-	# t5 - sy
-	# t6 - err
-	# t7 - 2*err
-	la $t1, ($t0) # t1 - y2
-	la $t0, ($a3) # t0 - x2
-	la $a3, 0 # color
-# remember return address
+# remember the return address
 	addiu $sp, $sp, -4
 	sw $ra, ($sp)
+	# $a1 - x1
+	# $a2 - y1
+	# $t2 - x2
+	# $t3 - y2
+	# $t4 - dx
+	# $t5 - dy
+	# $t6 - sx
+	# $t7 - sy
+	# $t8 - err
+	# $t9 - err2
+	la $t0, ($a1)	# t0 - coordinates
+	lw $a1, 0($t0)  # a1 - x1
+	lw $a2, 4($t0)  # a2 - y1
+	lw $t2, 8($t0)  # t2 - x2
+	lw $t3, 12($t0) # t3 - y2
 
-	la $t4, 1 # sx = -1
-	la $t5, -1 # sy = 1
-	sub $t2, $t0, $a1	# dx = x2 - x1
-	slt $t6, $t2, $zero
-	beq $t6, $zero, dx_is_positive	# if  x1 > x2:
-	sub $t2, $zero, $t2	# dx = |x2 - x1|
-	la $t4, -1
+
+
+	la $t6, 1 # sx = 1 	increment or decrement x
+	la $t7, -1 # sy = -1	increment or decrement y
+	sub $t4, $t2, $a1	# dx = x2 - x1
+	slt $t8, $t4, $zero
+	beq $t8, $zero, dx_is_positive	# if  x1 > x2:
+	sub $t4, $zero, $t4	# dx = |x2 - x1|
+	la $t6, -1	# set sx to decrement
 dx_is_positive:
-	sub $t3, $t1, $a2	# dy = y2 - y1
-	slt $t6, $zero, $t3	
-	beq $t6, $zero, dy_is_negative	# if  y1 < y2:
-	sub $t3, $zero, $t3	# dy = -|y2- y1|
-	la $t5, 1
+	sub $t5, $t3, $a2	# dy = y2 - y1
+	slt $t8, $zero, $t5
+	beq $t8, $zero, dy_is_negative	# if  y1 < y2:
+	sub $t5, $zero, $t5	# dy = -|y2- y1|
+	la $t7, 1	# set sy to increment
 dy_is_negative:
-	add $t6, $t2, $t3
+	add $t8, $t4, $t5	# error = dx + dy
 draw_line_loop:
 # plot x, y
-	addiu $sp, $sp, -12
-	sw $t0, 8($sp)
-	sw  $t1, 4($sp)
+	addiu $sp, $sp, -4
 	sw $t2, 0($sp)
-	jal set_pixel	
+	lw $t0, rowsize($a0)	# Bytes per row
+	mul $t0, $t0, $a2	# t0 = y * bytes per row
+	srl $t1, $a1, 3		# t1 = x >> 3
+	add $t0, $t0, $t1	# t0 = y*byets per row + x * 8
+	
+	lw $t1, imgaddr($a0)	# image address
+	add $t0, $t0, $t1	# t0 = y * byets_per_row + x * 8 + image_address
+
+	andi $t1, $a1, 0x07	# x and 00000111
+	li $t2, 0x80		# t2 -  10000000
+	srlv $t2, $t2, $t1	# 1 <-> 10000000
+	lb $t1, 0($t0)		
+	
+	not $t2, $t2		# set pixel black
+	and $t1 $t1, $t2
+	sb $t1, 0($t0)
 	lw $t2, 0($sp)
-	lw $t1, 4($sp)
-	lw $t0, 8($sp)
-	addiu $sp, $sp, 12
+	addiu $sp, $sp, 4
+	
 # if x0 == x1 and y0 == y1, stop loop
-	seq $t8, $a1, $t0
-	beq $t8, $zero, increment_x
-	seq $t8, $a2, $t1
-	beq $t8, $zero, increment_x
+	seq $t9, $a1, $t2
+	beq $t9, $zero, increment_x
+	seq $t9, $a2, $t3
+	beq $t9, $zero, increment_y
 	lw $ra, 0($sp)
 	addiu $sp, $sp, 4
 	jr $ra
+	
 increment_x:
-	sll $t7, $t6, 1 # 2 * err
-	blt $t7, $t3, increment_y
-	add $t6, $t6, $t3	# err += dy
-	add $a1, $a1, $t4	# x++
-increment_y:
-	sll $t7, $t6, 1 # 2 * err
-	bgt $t7, $t3, draw_line_loop
-	add $t6, $t6, $t2	# err += dx
-	add $a2, $a2, $t5	# y++
+
+	sll $t9, $t8, 1 # 2 * err
+	blt $t9, $t5, increment_y	# if err * 2 >= dy
+	add $t8, $t8, $t5	# err += dy
+	add $a1, $a1, $t6	# x++ / x--
+	seq $t9, $a2, $t3
+	beq $t9, $zero, increment_y
 	j draw_line_loop
 	
+increment_y:
+	sll $t9, $t8, 1 # 2 * err
+	bgt $t9, $t4, draw_line_loop	# if err * 2 < dx
+	add $t8, $t8, $t4	# err += dx
+	add $a2, $a2, $t7	# y++ / y--
+	j draw_line_loop
+
+
 read_bmp_file:
 #$a0 - descriptor
 #$a1 - file name
-
-# save arguments in t registers
 	la $t1, ($a0)	# imgdescriptor
 # syscall 13 - open file, returns descriptor
 	la $a0, ($a1)
@@ -221,13 +235,6 @@ set_pixel:
 	srlv $t2, $t2, $t1
 	lb $t1, 0($t0)
 	
-	beqz $a3, set_black
-	or $t1, $t1, $t2
-	sb $t1, 0($t0)
-	
-	jr $ra
-
-set_black:
 	not $t2, $t2
 	and $t1, $t1, $t2
 	sb $t1, 0($t0)
